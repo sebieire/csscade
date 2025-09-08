@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.7"
 license = {text = "MIT"}
 authors = [
-    {name = "sebieire", email = ""},
+    {name = "sebieire"},
 ]
 maintainers = [
     {name = "sebieire"},
@@ -28,7 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Text Processing :: Markup :: CSS",
+    "Topic :: Text Processing :: Markup",
     "Topic :: Software Development :: User Interfaces",
 ]
 dependencies = [
