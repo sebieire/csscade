@@ -1,5 +1,9 @@
 # CSSCade 🎨
 
+[![PyPI version](https://badge.fury.io/py/csscade.svg)](https://pypi.org/project/csscade/)
+[![Python Support](https://img.shields.io/pypi/pyversions/csscade.svg)](https://pypi.org/project/csscade/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **Intelligent CSS merging with conflict resolution and multiple strategies**
 
 CSSCade is a Python library that intelligently merges CSS properties from different sources, handling conflicts, preserving specificity, and supporting various merge strategies. Perfect for theme customization, runtime CSS manipulation, and CSS-in-JS implementations.
