@@ -494,6 +494,7 @@ merger = CSSMerger(
     mode='component',
     naming={'prefix': 'custom-'}
 )
+```
 
 ## Contributing
 
