@@ -8,6 +8,7 @@ from csscade.parser.css_parser import CSSParser
 from csscade.generator.output import OutputFormatter
 from csscade.generator.naming import ClassNameGenerator
 from csscade.resolvers.conflict_detector import ConflictDetector
+from csscade.utils.rule_matcher import RuleMatcher
 from csscade.handlers.selector_utils import (
     split_pseudo_selector, 
     rebuild_selector_with_base,
@@ -22,24 +23,30 @@ class ComponentMergeStrategy(MergeStrategy):
     allowing both original and override classes to be applied.
     """
     
-    def __init__(self, conflict_resolution=None, naming=None):
+    def __init__(self, conflict_resolution=None, naming=None, rule_selection='first', shorthand_strategy='cascade', validation=None):
         """
         Initialize the component merge strategy.
         
         Args:
             conflict_resolution: Optional conflict resolution configuration
             naming: Optional naming configuration
+            rule_selection: Rule selection mode ('first' or 'all')
+            shorthand_strategy: Shorthand handling strategy ('cascade', 'smart', 'expand')
+            validation: Validation configuration
         """
-        super().__init__(conflict_resolution, naming)
-        self.merger = PropertyMerger()
+        super().__init__(conflict_resolution, naming, rule_selection, validation)
+        # Initialize PropertyMerger with important and shorthand strategies
+        important_strategy = conflict_resolution.get('important', 'match') if conflict_resolution else 'match'
+        self.merger = PropertyMerger(important_strategy=important_strategy, shorthand_strategy=shorthand_strategy)
         self.parser = CSSParser()
         self.formatter = OutputFormatter()
+        self.rule_matcher = RuleMatcher()
         
         # Use naming config if provided
         naming_config = naming or {}
         self.name_generator = ClassNameGenerator(
             strategy=naming_config.get('strategy', 'semantic'),
-            prefix=naming_config.get('prefix', 'css-'),
+            prefix=naming_config.get('prefix', 'csscade-'),
             suffix=naming_config.get('suffix', ''),
             hash_length=naming_config.get('hash_length', 8)
         )
@@ -50,6 +57,7 @@ class ComponentMergeStrategy(MergeStrategy):
         source: Union[str, CSSRule, Dict[str, str], List[CSSProperty]],
         override: Union[Dict[str, str], List[CSSProperty], str],
         component_id: Optional[str] = None,
+        apply_to: Union[str, List[str]] = 'all',
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -59,25 +67,35 @@ class ComponentMergeStrategy(MergeStrategy):
             source: Source CSS (can be rule, properties, or string)
             override: Override properties
             component_id: Optional component ID for unique class naming
+            apply_to: Which rules to apply overrides to
             **kwargs: Additional parameters
             
         Returns:
             Dictionary with:
-                - css: New override class with only conflicting properties
-                - add: List of classes to add (the new override class)
-                - preserve: List of classes to preserve (original class)
-                - inline: None (no inline styles needed)
+                - css: List of CSS strings for the override class
+                - add: List containing the new override class name
+                - preserve: List containing original class name
+                - remove: Empty list
+                - warnings: List of warnings
+                - info: List of info messages
         """
         self.validate_input(source, override)
         
         # Parse source to determine type
+        rules_to_process = []
+        
         if isinstance(source, CSSRule):
-            source_rule = source
+            rules_to_process = [source]
         elif isinstance(source, str) and '{' in source:
-            rules = self.parser.parse_rule_string(source)
-            if not rules:
+            all_rules = self.parser.parse_rule_string(source)
+            if not all_rules:
                 raise ValueError("No valid CSS rule found in source")
-            source_rule = rules[0]
+            
+            # Select rules based on rule_selection parameter
+            if self.rule_selection == 'first':
+                rules_to_process = [all_rules[0]]
+            else:  # 'all'
+                rules_to_process = all_rules
         else:
             # Source is properties only, need a selector
             selector = kwargs.get('selector', '.default')
@@ -87,9 +105,9 @@ class ComponentMergeStrategy(MergeStrategy):
                 props = self.parser.parse_properties_dict(source)
             else:
                 props = source
-            source_rule = CSSRule(selector=selector, properties=props)
+            rules_to_process = [CSSRule(selector=selector, properties=props)]
         
-        # Parse override properties
+        # Parse override properties once
         if isinstance(override, str):
             override_props = self.parser.parse_properties_string(override)
         elif isinstance(override, dict):
@@ -97,155 +115,98 @@ class ComponentMergeStrategy(MergeStrategy):
         else:
             override_props = override
         
-        # Check if selector has pseudo-class/element
-        base_selector, pseudo_part = split_pseudo_selector(source_rule.selector)
+        # Group rules by base selector for component mode
+        # We create ONE override class per base selector group
+        base_groups = self.rule_matcher.group_related_rules(rules_to_process)
         
-        # Generate new base class name for the component
-        new_base_name = self.name_generator.generate_for_mode(
-            mode="component",
-            base_selector=base_selector,
-            properties=override_props,
-            component_id=component_id
-        )
-        
-        # Remove leading . or # from class name for clean output
-        clean_class_name = new_base_name.lstrip('.#')
-        
-        css_rules = []
+        css_outputs = []
         warnings = []
+        info = []
+        add_classes = []
+        preserve_classes = []
         
-        if pseudo_part:
-            # Use ConflictResolver if available
-            if self.conflict_resolver:
-                resolution = self.conflict_resolver.resolve_pseudo_conflict(
-                    source_rule, override_props, pseudo_part
-                )
-                
-                if resolution['strategy'] == 'preserve':
-                    # Keep pseudo selector, create new rule with pseudo
-                    base_rule = CSSRule(
-                        selector=new_base_name,
-                        properties=[]  # Would copy from original base rule if found
-                    )
-                    css_rules.append(self.formatter.format_rule(base_rule, format="css"))
-                    
-                    pseudo_selector = rebuild_selector_with_base(new_base_name, pseudo_part)
-                    merged_props = self.merger.merge_properties(
-                        source_rule.properties,
-                        override_props
-                    )
-                    pseudo_rule = CSSRule(
-                        selector=pseudo_selector,
-                        properties=merged_props
-                    )
-                    css_rules.append(self.formatter.format_rule(pseudo_rule, format="css"))
-                    
-                    if 'message' in resolution:
-                        warnings.append(resolution['message'])
-                        
-                elif resolution['strategy'] == 'inline':
-                    # Convert to inline styles for runtime application
-                    base_rule = CSSRule(
-                        selector=new_base_name,
-                        properties=self.merger.merge_properties(
-                            source_rule.properties,
-                            override_props
-                        )
-                    )
-                    css_rules.append(self.formatter.format_rule(base_rule, format="css"))
-                    
-                    # Add inline styles to result
-                    result_inline = resolution.get('inline_styles', {})
-                    pseudo_state = resolution.get('pseudo_state', pseudo_part)
-                    
-                    # Store inline styles for the pseudo state
-                    if 'message' in resolution:
-                        warnings.append(resolution['message'])
-                        
-                elif resolution['strategy'] == 'force_merge':
-                    # Merge without pseudo selector
-                    merged_props = self.merger.merge_properties(
-                        source_rule.properties,
-                        override_props
-                    )
-                    base_rule = CSSRule(
-                        selector=new_base_name,
-                        properties=merged_props
-                    )
-                    css_rules.append(self.formatter.format_rule(base_rule, format="css"))
-                    
-                    if 'warning' in resolution:
-                        warnings.append(resolution['warning'])
-                        
-                else:
-                    # Fallback to original behavior
-                    base_rule = CSSRule(
-                        selector=new_base_name,
-                        properties=[]
-                    )
-                    css_rules.append(self.formatter.format_rule(base_rule, format="css"))
-                    
-                    pseudo_selector = rebuild_selector_with_base(new_base_name, pseudo_part)
-                    merged_props = self.merger.merge_properties(
-                        source_rule.properties,
-                        override_props
-                    )
-                    pseudo_rule = CSSRule(
-                        selector=pseudo_selector,
-                        properties=merged_props
-                    )
-                    css_rules.append(self.formatter.format_rule(pseudo_rule, format="css"))
-            else:
-                # Original behavior when no conflict resolver
-                base_rule = CSSRule(
-                    selector=new_base_name,
-                    properties=[]
-                )
-                css_rules.append(self.formatter.format_rule(base_rule, format="css"))
-                
-                warnings.append(
-                    f"Base rule {new_base_name} created empty. Configure conflict_resolution " +
-                    f"for better pseudo selector handling."
-                )
-                
-                pseudo_selector = rebuild_selector_with_base(new_base_name, pseudo_part)
-                merged_props = self.merger.merge_properties(
-                    source_rule.properties,
-                    override_props
-                )
-                pseudo_rule = CSSRule(
-                    selector=pseudo_selector,
-                    properties=merged_props
-                )
-                css_rules.append(self.formatter.format_rule(pseudo_rule, format="css"))
-        else:
-            # Regular selector without pseudo - original behavior
-            merged_props = self.merger.merge_properties(
-                source_rule.properties,
-                override_props
+        for base_selector, related_rules in base_groups.items():
+            # Generate new class name for this component
+            new_class_name = self.name_generator.generate_for_mode(
+                mode="component",
+                base_selector=base_selector,
+                properties=override_props,
+                component_id=component_id
             )
             
-            override_rule = CSSRule(
-                selector=new_base_name,
-                properties=merged_props
-            )
-            css_rules.append(self.formatter.format_rule(override_rule, format="css"))
+            # Clean class name for output
+            clean_class_name = new_class_name.lstrip('.#')
+            add_classes.append(clean_class_name)
+            preserve_classes.append(base_selector.lstrip('.#'))
+            
+            # Check if we have a base rule (no pseudo-selectors)
+            base_rule = None
+            pseudo_rules = []
+            
+            for rule in related_rules:
+                if ':' not in rule.selector:
+                    base_rule = rule
+                else:
+                    pseudo_rules.append(rule)
+            
+            # If no base rule exists, create an empty one with warning
+            if not base_rule:
+                warnings.append(f"No base rule found for {base_selector}. Creating empty base class.")
+                base_rule = CSSRule(selector=base_selector, properties=[])
+            
+            # Process base rule if overrides should apply
+            if self.rule_matcher.should_apply_override(base_rule.selector, apply_to):
+                # Validate override properties if validation is enabled
+                validation_warnings = self.validate_properties(override_props)
+                warnings.extend(validation_warnings)
+                
+                # Merge base properties with overrides
+                merged_props, merge_info, merge_warnings = self.merger.merge(base_rule.properties, override_props)
+                override_base_rule = CSSRule(selector=new_class_name, properties=merged_props)
+                css_outputs.append(self.formatter.format_rule(override_base_rule, format="css"))
+                info.append(f"Created override class {new_class_name} with merged properties")
+                info.extend(merge_info)
+                warnings.extend(merge_warnings)
+            else:
+                # Create base override class with original properties only
+                override_base_rule = CSSRule(selector=new_class_name, properties=base_rule.properties)
+                css_outputs.append(self.formatter.format_rule(override_base_rule, format="css"))
+                info.append(f"Created override class {new_class_name} preserving original properties")
+            
+            # Process all pseudo-selector rules
+            for pseudo_rule in pseudo_rules:
+                # Extract pseudo part from selector
+                _, pseudo_part = split_pseudo_selector(pseudo_rule.selector)
+                new_pseudo_selector = rebuild_selector_with_base(new_class_name, pseudo_part)
+                
+                # Check if overrides should apply to this pseudo rule
+                if self.rule_matcher.should_apply_override(pseudo_rule.selector, apply_to):
+                    # Merge properties for this pseudo state
+                    merged_props, merge_info, merge_warnings = self.merger.merge(pseudo_rule.properties, override_props)
+                    override_pseudo_rule = CSSRule(selector=new_pseudo_selector, properties=merged_props)
+                    info.append(f"Applied overrides to {new_pseudo_selector}")
+                    info.extend(merge_info)
+                    warnings.extend(merge_warnings)
+                else:
+                    # Preserve original properties for this pseudo state
+                    override_pseudo_rule = CSSRule(selector=new_pseudo_selector, properties=pseudo_rule.properties)
+                    info.append(f"Preserved {new_pseudo_selector} without overrides")
+                
+                css_outputs.append(self.formatter.format_rule(override_pseudo_rule, format="css"))
         
-        css_output = "\n".join(css_rules) if css_rules else None
+        # Add warning if only processing first rule but there were more
+        if self.rule_selection == 'first' and isinstance(source, str) and '{' in source:
+            all_rules = self.parser.parse_rule_string(source)
+            if len(all_rules) > 1:
+                warnings.append(f"Only processed first rule. {len(all_rules)-1} additional rules ignored. Set rule_selection='all' to process all rules.")
         
-        # Prepare result
-        result = {
-            "css": css_output,
-            "add": [clean_class_name],  # Use the clean class name
-            "preserve": [base_selector.lstrip('.#')],  # Preserve original base selector
-            "inline_styles": None
-        }
-        
-        # Add warnings if any
-        if warnings:
-            result["warnings"] = warnings
-        
-        return result
+        return self.prepare_result(
+            css=css_outputs,
+            add_classes=add_classes,
+            preserve_classes=preserve_classes,
+            warnings=warnings,
+            info=info
+        )
     
     def get_strategy_name(self) -> str:
         """Get the name of this strategy."""

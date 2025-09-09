@@ -124,9 +124,6 @@ class ClassNameGenerator:
         else:
             parts.append("style")
         
-        # Add "override" indicator
-        parts.append("override")
-        
         # Add component ID if provided
         if component_id:
             parts.append(component_id)

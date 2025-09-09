@@ -1,4 +1,4 @@
-"""Property-level merging logic for CSS with configurable shorthand handling."""
+"""Property-level merging logic for CSS with intelligent shorthand handling."""
 
 from typing import List, Dict, Union, Optional, Tuple
 from csscade.models import CSSProperty, CSSRule
@@ -9,31 +9,20 @@ from csscade.utils.important_parser import ImportantParser
 
 
 class PropertyMerger:
-    """Handles merging of CSS properties with configurable shorthand handling."""
+    """Handles merging of CSS properties with intelligent shorthand/longhand resolution."""
     
-    # Properties that benefit from intelligent expansion
-    SMART_EXPAND_PROPERTIES = {
-        'margin', 'padding',  # These are simple and benefit from smart merging
-        # 'border', 'border-width', etc. are NOT here - they cascade by default
-    }
-    
-    def __init__(self, important_strategy: str = 'match', shorthand_strategy: str = 'cascade'):
+    def __init__(self, important_strategy: str = 'match'):
         """
         Initialize the property merger.
         
         Args:
             important_strategy: Strategy for handling !important ('match', 'respect', 'override', 'force', 'strip')
-            shorthand_strategy: Strategy for handling shorthands:
-                - 'cascade': Let CSS cascade handle it (default)
-                - 'smart': Intelligently expand simple properties only
-                - 'expand': Expand all shorthands for intelligent merging
         """
         self.conflict_detector = ConflictDetector()
         self.shorthand_resolver = ShorthandResolver()
         self.parser = CSSParser()
         self.important_parser = ImportantParser()
         self.important_strategy = important_strategy
-        self.shorthand_strategy = shorthand_strategy
         self.info_messages = []
         self.warning_messages = []
     
@@ -44,7 +33,7 @@ class PropertyMerger:
         important_strategy: Optional[str] = None
     ) -> List[CSSProperty]:
         """
-        Merge two lists of CSS properties.
+        Merge two lists of CSS properties with intelligent shorthand handling.
         
         This is the old interface for backward compatibility.
         Use merge() for the new interface with message returns.
@@ -80,7 +69,13 @@ class PropertyMerger:
         important_strategy: Optional[str] = None
     ) -> Tuple[List[CSSProperty], List[str], List[str]]:
         """
-        Merge source and override properties based on strategy.
+        Merge source and override properties with intelligent shorthand handling.
+        
+        Key features:
+        1. Expands shorthands for intelligent merging
+        2. Preserves longhand values when only partial override occurs
+        3. Recombines to shorthand when possible for cleaner output
+        4. Handles !important conflicts according to strategy
         
         Args:
             source: List of source CSS properties
@@ -102,113 +97,7 @@ class PropertyMerger:
             self.warning_messages.append(f"Unknown important strategy '{strategy}', using 'match'")
             strategy = 'match'
         
-        # Handle based on shorthand strategy
-        if self.shorthand_strategy == 'cascade':
-            # Simple cascade mode - just combine properties
-            return self._merge_cascade_mode(source, override, strategy)
-        elif self.shorthand_strategy == 'smart':
-            # Smart mode - expand only simple properties
-            return self._merge_smart_mode(source, override, strategy)
-        else:  # 'expand'
-            # Full expansion mode - expand everything
-            return self._merge_expand_mode(source, override, strategy)
-    
-    def _merge_cascade_mode(
-        self,
-        source: List[CSSProperty],
-        override: List[CSSProperty],
-        strategy: str
-    ) -> Tuple[List[CSSProperty], List[str], List[str]]:
-        """
-        Simple cascade mode - combine properties, let CSS cascade handle conflicts.
-        """
-        # Create a dictionary to track properties by name
-        merged_props: Dict[str, CSSProperty] = {}
-        
-        # Add all source properties
-        for prop in source:
-            merged_props[prop.name] = prop
-        
-        # Apply overrides - simply replace if same property name
-        for override_prop in override:
-            original_prop = merged_props.get(override_prop.name)
-            
-            # Apply !important strategy
-            if strategy == 'respect' and original_prop and hasattr(original_prop, 'important') and original_prop.important:
-                self.info_messages.append(
-                    f"Property '{override_prop.name}' has !important and 'respect' mode is active - not overriding"
-                )
-                continue
-            
-            # Apply important strategy and add/replace property
-            final_prop = self._apply_important_strategy(original_prop, override_prop, strategy)
-            merged_props[override_prop.name] = final_prop
-        
-        return list(merged_props.values()), self.info_messages, self.warning_messages
-    
-    def _merge_smart_mode(
-        self,
-        source: List[CSSProperty],
-        override: List[CSSProperty],
-        strategy: str
-    ) -> Tuple[List[CSSProperty], List[str], List[str]]:
-        """
-        Smart mode - intelligently expand only simple properties like margin/padding.
-        Complex properties like border use cascade.
-        """
-        # Separate properties into smart-expand and cascade groups
-        source_smart = []
-        source_cascade = []
-        override_smart = []
-        override_cascade = []
-        
-        for prop in source:
-            if self._should_smart_expand(prop.name):
-                source_smart.append(prop)
-            else:
-                source_cascade.append(prop)
-        
-        for prop in override:
-            if self._should_smart_expand(prop.name):
-                override_smart.append(prop)
-            else:
-                override_cascade.append(prop)
-        
-        # Handle smart properties with expansion
-        smart_result = []
-        if source_smart or override_smart:
-            expanded_source = self._expand_all_properties(source_smart)
-            expanded_override = self._expand_all_properties(override_smart)
-            merged_longhands = self._merge_longhands(expanded_source, expanded_override, strategy)
-            smart_result = self._optimize_to_shorthands(merged_longhands)
-        
-        # Handle cascade properties simply
-        cascade_dict = {}
-        for prop in source_cascade:
-            cascade_dict[prop.name] = prop
-        for prop in override_cascade:
-            original = cascade_dict.get(prop.name)
-            if strategy == 'respect' and original and hasattr(original, 'important') and original.important:
-                self.info_messages.append(
-                    f"Property '{prop.name}' has !important and 'respect' mode is active - not overriding"
-                )
-                continue
-            cascade_dict[prop.name] = self._apply_important_strategy(original, prop, strategy)
-        
-        # Combine results
-        all_results = smart_result + list(cascade_dict.values())
-        return all_results, self.info_messages, self.warning_messages
-    
-    def _merge_expand_mode(
-        self,
-        source: List[CSSProperty],
-        override: List[CSSProperty],
-        strategy: str
-    ) -> Tuple[List[CSSProperty], List[str], List[str]]:
-        """
-        Full expansion mode - expand all shorthands for intelligent merging.
-        """
-        # Step 1: Expand all shorthands to longhands
+        # Step 1: Expand all shorthands to longhands for intelligent merging
         expanded_source = self._expand_all_properties(source)
         expanded_override = self._expand_all_properties(override)
         
@@ -220,27 +109,6 @@ class PropertyMerger:
         
         return optimized_result, self.info_messages, self.warning_messages
     
-    def _should_smart_expand(self, property_name: str) -> bool:
-        """
-        Determine if a property should be smartly expanded.
-        
-        Args:
-            property_name: CSS property name
-            
-        Returns:
-            True if property should be expanded, False otherwise
-        """
-        # Check if it's a simple property that benefits from expansion
-        if property_name in self.SMART_EXPAND_PROPERTIES:
-            return True
-        
-        # Check if it's a longhand of a smart property
-        for smart_prop in self.SMART_EXPAND_PROPERTIES:
-            if property_name.startswith(f"{smart_prop}-"):
-                return True
-        
-        return False
-    
     def _expand_all_properties(self, properties: List[CSSProperty]) -> Dict[str, CSSProperty]:
         """
         Expand all properties, converting shorthands to longhands.
@@ -249,6 +117,11 @@ class PropertyMerger:
         expanded = {}
         
         for prop in properties:
+            # Check for typos like border-color-top instead of border-top-color
+            fixed_name = self._fix_property_name(prop.name)
+            if fixed_name != prop.name:
+                prop = CSSProperty(name=fixed_name, value=prop.value, important=getattr(prop, 'important', False))
+            
             if self.conflict_detector.is_shorthand(prop.name):
                 # Expand shorthand to longhands
                 try:
@@ -267,6 +140,23 @@ class PropertyMerger:
                 expanded[prop.name] = prop
         
         return expanded
+    
+    def _fix_property_name(self, name: str) -> str:
+        """Fix common property name mistakes."""
+        # Fix border property names
+        if name.startswith('border-color-'):
+            side = name.replace('border-color-', '')
+            if side in ['top', 'right', 'bottom', 'left']:
+                return f'border-{side}-color'
+        elif name.startswith('border-width-'):
+            side = name.replace('border-width-', '')
+            if side in ['top', 'right', 'bottom', 'left']:
+                return f'border-{side}-width'
+        elif name.startswith('border-style-'):
+            side = name.replace('border-style-', '')
+            if side in ['top', 'right', 'bottom', 'left']:
+                return f'border-{side}-style'
+        return name
     
     def _merge_longhands(
         self,
@@ -357,18 +247,23 @@ class PropertyMerger:
     def _optimize_to_shorthands(self, longhands: Dict[str, CSSProperty]) -> List[CSSProperty]:
         """
         Optimize longhands back to shorthands where possible for cleaner output.
-        Only used in smart/expand modes.
         """
         result = []
         processed = set()
         
         # Define shorthand groups that can be combined
+        # Order matters - check more specific patterns first
         shorthand_groups = [
             (['margin-top', 'margin-right', 'margin-bottom', 'margin-left'], 'margin'),
             (['padding-top', 'padding-right', 'padding-bottom', 'padding-left'], 'padding'),
+            (['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'], 'border-width'),
+            (['border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style'], 'border-style'),
+            (['border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'], 'border-color'),
+            (['border-top-left-radius', 'border-top-right-radius', 'border-bottom-right-radius', 'border-bottom-left-radius'], 'border-radius'),
+            (['overflow-x', 'overflow-y'], 'overflow'),
+            (['row-gap', 'column-gap'], 'gap'),
         ]
         
-        # Only try to combine simple properties
         for longhand_names, shorthand_name in shorthand_groups:
             # Check if all longhands are present and not yet processed
             if all(name in longhands and name not in processed for name in longhand_names):
@@ -397,6 +292,8 @@ class PropertyMerger:
                         ))
                         for name in longhand_names:
                             processed.add(name)
+                        # Only log optimization in verbose mode
+                        # self.info_messages.append(f"Optimized {', '.join(longhand_names)} to {shorthand_name}")
                     else:
                         # Mixed !important - keep as longhands
                         for name in longhand_names:
@@ -421,7 +318,7 @@ class PropertyMerger:
         Try to combine longhand values into a shorthand value.
         Returns the combined shorthand value, or None if cannot combine.
         """
-        if shorthand_name in ['margin', 'padding']:
+        if shorthand_name in ['margin', 'padding', 'border-width', 'border-style', 'border-color']:
             # Box model properties
             if len(values) == 4:
                 top, right, bottom, left = values
@@ -438,5 +335,38 @@ class PropertyMerger:
                 # All different
                 else:
                     return f"{top} {right} {bottom} {left}"
+        
+        elif shorthand_name == 'border-radius':
+            if len(values) == 4:
+                tl, tr, br, bl = values
+                
+                # All same
+                if tl == tr == br == bl:
+                    return tl
+                # Diagonal pairs
+                elif tl == br and tr == bl:
+                    return f"{tl} {tr}"
+                # Three values
+                elif tr == bl:
+                    return f"{tl} {tr} {br}"
+                # All different
+                else:
+                    return f"{tl} {tr} {br} {bl}"
+        
+        elif shorthand_name == 'overflow':
+            if len(values) == 2:
+                x, y = values
+                if x == y:
+                    return x
+                else:
+                    return f"{x} {y}"
+        
+        elif shorthand_name == 'gap':
+            if len(values) == 2:
+                row, col = values
+                if row == col:
+                    return row
+                else:
+                    return f"{row} {col}"
         
         return None

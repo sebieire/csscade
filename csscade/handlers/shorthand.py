@@ -78,6 +78,44 @@ class ShorthandResolver:
         if not prefix:
             prefix = 'margin'  # Default fallback
         
+        # Handle border properties differently - they use border-SIDE-PROPERTY pattern
+        if prefix.startswith('border-'):
+            # For border-width, border-style, border-color
+            property_type = prefix.replace('border-', '')  # 'width', 'style', or 'color'
+            if len(parts) == 1:
+                val = parts[0]
+                return [
+                    CSSProperty(f'border-top-{property_type}', val),
+                    CSSProperty(f'border-right-{property_type}', val),
+                    CSSProperty(f'border-bottom-{property_type}', val),
+                    CSSProperty(f'border-left-{property_type}', val)
+                ]
+            elif len(parts) == 2:
+                vert, horiz = parts
+                return [
+                    CSSProperty(f'border-top-{property_type}', vert),
+                    CSSProperty(f'border-right-{property_type}', horiz),
+                    CSSProperty(f'border-bottom-{property_type}', vert),
+                    CSSProperty(f'border-left-{property_type}', horiz)
+                ]
+            elif len(parts) == 3:
+                top, horiz, bottom = parts
+                return [
+                    CSSProperty(f'border-top-{property_type}', top),
+                    CSSProperty(f'border-right-{property_type}', horiz),
+                    CSSProperty(f'border-bottom-{property_type}', bottom),
+                    CSSProperty(f'border-left-{property_type}', horiz)
+                ]
+            elif len(parts) == 4:
+                top, right, bottom, left = parts
+                return [
+                    CSSProperty(f'border-top-{property_type}', top),
+                    CSSProperty(f'border-right-{property_type}', right),
+                    CSSProperty(f'border-bottom-{property_type}', bottom),
+                    CSSProperty(f'border-left-{property_type}', left)
+                ]
+        
+        # Regular margin/padding pattern
         if len(parts) == 1:
             # All sides same value
             val = parts[0]

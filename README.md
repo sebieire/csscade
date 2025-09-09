@@ -8,33 +8,21 @@
 
 CSSCade is a Python library that intelligently merges CSS properties from different sources, handling conflicts, preserving specificity, and supporting various merge strategies. Perfect for theme customization, runtime CSS manipulation, and CSS-in-JS implementations.
 
-I was looking for something like this in the Python ecosystem but couldn't find anything, so here it is.
-
 ## Features ✨
 
 - **3 Merge Modes**: Permanent, Component, and Replace strategies
-- **Intelligent Conflict Resolution**: Handle pseudo selectors, !important, shorthands, and media queries
-- **Smart Property Merging**: Understands CSS semantics and property relationships
+- **Multi-Rule Support**: Process all CSS rules including pseudo-selectors with `rule_selection='all'`
+- **Selective Application**: Target specific rules with the `apply_to` parameter
+- **Intelligent Conflict Resolution**: Handle !important, shorthand properties, and duplicates
+- **Smart Property Merging**: Configurable shorthand strategies (cascade, smart, expand)
+- **CSS Validation**: Optional property and value validation with helpful warnings
+- **Flexible Naming**: Multiple class naming strategies (semantic, hash, sequential)
 - **Production Ready**: Used in real-world applications for dynamic theming
-- **Fully Typed**: Complete type hints for better IDE support
 
 ## Installation
 
-### For Users
 ```bash
 pip install csscade
-```
-
-This installs only the minimal runtime dependency (`cssutils`).
-
-### For Developers
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/csscade.git
-cd csscade
-
-# Install development dependencies
-pip install -r requirements-dev.txt
 ```
 
 **Minimal Dependencies:** CSSCade has only ONE runtime dependency (`cssutils`) making it lightweight and fast to install!
@@ -46,8 +34,8 @@ pip install -r requirements-dev.txt
 ```python
 from csscade import CSSMerger
 
-# Create a merger with your preferred mode
-merger = CSSMerger(mode='component')
+# Create a merger (defaults to 'component' mode)
+merger = CSSMerger()
 
 # Merge CSS
 source_css = ".btn { color: red; padding: 10px; }"
@@ -55,39 +43,79 @@ overrides = {"color": "blue", "margin": "5px"}
 
 result = merger.merge(source_css, overrides)
 
-print(result['css'])        # The generated CSS
-print(result['add'])        # Classes to add: ['btn-override-xxx']
+# Result structure (all fields always present):
+print(result['css'])        # List of generated CSS strings
+print(result['add'])        # Classes to add: ['csscade-btn-xxxx']
+print(result['remove'])     # Classes to remove: []
 print(result['preserve'])   # Classes to keep: ['btn']
+print(result['warnings'])   # Any warnings: []
+print(result['info'])       # Informational messages: []
+```
+
+**Output:**
+```python
+{
+    'css': ['.csscade-btn-3f4a { color: blue; padding: 10px; margin: 5px; }'],
+    'add': ['csscade-btn-3f4a'],
+    'remove': [],
+    'preserve': ['btn'],
+    'warnings': [],
+    'info': ['Created override class .csscade-btn-3f4a with merged properties']
+}
+```
+
+### Multi-Rule Support
+
+Process multiple CSS rules including pseudo-selectors:
+
+```python
+# Process only first CSS rule/class (default)
+merger = CSSMerger(rule_selection='first')
+result = merger.merge(
+    ".btn { color: red; } .btn:hover { color: darkred; }",
+    {"background": "blue"}
+)
+# Only .btn is processed, warning about ignored rules
+
+# Process ALL rules including pseudo-selectors
+merger = CSSMerger(rule_selection='all')
+result = merger.merge(
+    ".btn { color: red; } .btn:hover { color: darkred; }",
+    {"background": "blue"}
+)
+# Both .btn and .btn:hover get background: blue
 ```
 
 ## Merge Modes
 
-CSSCade offers three different merge strategies, each suited for different use cases:
-
 ### 1. Permanent Mode
-Directly modifies the original CSS rule. Best for build-time CSS generation.
+**Directly modifies the original CSS rule. Best for build-time CSS generation.**
 
 ```python
-merger = CSSMerger(mode='permanent')
+merger = CSSMerger(mode='permanent')  # Required parameter
 
 result = merger.merge(
     ".card { color: red; padding: 10px; }",
     {"color": "blue", "margin": "20px"}
 )
 
-# Output CSS:
+# Output:
+print(result['css'][0])
 # .card {
 #   color: blue;      /* Changed */
 #   padding: 10px;    /* Preserved */
 #   margin: 20px;     /* Added */
 # }
+
+# Usage: Apply the modified CSS directly
+# No class changes needed
 ```
 
-### 2. Component Mode
-Creates an override class while preserving the original. Perfect for theming systems.
+### 2. Component Mode (Default)
+**Creates an override class while preserving the original. Perfect for theming systems.**
 
 ```python
-merger = CSSMerger(mode='component')
+merger = CSSMerger(mode='component')  # Optional (this is default)
 
 result = merger.merge(
     ".btn { color: red; padding: 10px; }",
@@ -95,423 +123,504 @@ result = merger.merge(
 )
 
 # Output:
-# - CSS: .btn-override-xxx { color: blue; margin: 5px; }
-# - Add class: 'btn-override-xxx'
-# - Preserve class: 'btn'
-# Usage: <button class="btn btn-override-xxx">
+print(result['css'][0])
+# .csscade-btn-3f4a {
+#   color: blue;
+#   padding: 10px;
+#   margin: 5px;
+# }
+
+print(result['add'])       # ['csscade-btn-3f4a']
+print(result['preserve'])  # ['btn']
+
+# Usage: element.className = "btn csscade-btn-3f4a"
 ```
 
 ### 3. Replace Mode
-Creates a complete replacement class with all properties merged (if you no longer want or need the original class).
+**Creates a complete replacement class. Best for total style replacement.**
 
 ```python
-merger = CSSMerger(mode='replace')
+merger = CSSMerger(mode='replace')  # Required parameter
 
 result = merger.merge(
-    ".btn { color: red; padding: 10px; }",
+    ".old-style { color: red; padding: 10px; }",
     {"color": "blue", "margin": "5px"}
 )
 
 # Output:
-# - CSS: .btn-replaced-xxx { color: blue; padding: 10px; margin: 5px; }
-# - Add class: 'btn-replaced-xxx'
-# - Remove class: 'btn'
-# Usage: <button class="btn-replaced-xxx">
+print(result['css'][0])
+# .csscade-8d2f {
+#   color: blue;
+#   padding: 10px;
+#   margin: 5px;
+# }
+
+print(result['add'])     # ['csscade-8d2f']
+print(result['remove'])  # ['old-style']
+
+# Usage: element.className = "csscade-8d2f"
 ```
 
-## Conflict Resolution 🔧
+## Apply To Parameter (Selective Override)
 
-CSSCade can intelligently handle various CSS conflicts:
+The `apply_to` parameter lets you target specific rules when using `rule_selection='all'`.
 
-### Pseudo Selectors
+### Basic Example
 
 ```python
-# Preserve hover states
-merger = CSSMerger(
-    mode='component',
-    conflict_resolution={'pseudo': 'preserve'}
-)
+merger = CSSMerger(rule_selection='all')
 
-result = merger.merge(
-    ".btn:hover { color: red; }",
-    {"color": "blue", "padding": "10px"}
-)
-# Creates: .btn-new:hover with merged properties
+source = """
+.btn { background: blue; color: white; }
+.btn:hover { background: darkblue; }
+"""
 
-# Convert to inline for JavaScript
-merger = CSSMerger(
-    mode='component',
-    conflict_resolution={'pseudo': 'inline'}
-)
-# Returns inline styles for runtime application
+# Apply to all rules (default)
+result = merger.merge(source, {"border": "2px solid red"}, apply_to='all')
+# Both .btn and .btn:hover get the border
+
+# Apply to base rule only
+result = merger.merge(source, {"border": "2px solid red"}, apply_to='base')
+# Only .btn gets the border, .btn:hover remains unchanged
+
+# Apply to specific pseudo-selector
+result = merger.merge(source, {"border": "2px solid red"}, apply_to=[':hover'])
+# Only .btn:hover gets the border
 ```
+
+### Advanced Example with Multiple Targets
+
+```python
+source = """
+.btn { background: blue; }
+.btn:hover { background: darkblue; }
+.btn:active { background: navy; }
+.btn:focus { outline: none; }
+"""
+
+# Target multiple specific states
+result = merger.merge(
+    source,
+    {"box-shadow": "0 2px 4px rgba(0,0,0,0.2)"},
+    apply_to=[':hover', ':focus']
+)
+# Only :hover and :focus states get the box-shadow
+```
+
+### Available Apply To Options
+
+- `'all'` - Apply to all rules (default)
+- `'base'` - Apply to base rule only (no pseudo-selectors)
+- `[':hover']` - Apply to specific pseudo-selector
+- `[':hover', ':active']` - Apply to multiple pseudo-selectors
+- `['.btn']` - Apply to specific class
+- `['.btn:hover']` - Apply to specific class with pseudo-selector
+
+## Conflict Resolution
 
 ### !important Handling
 
+CSSCade provides 5 strategies for handling !important declarations:
+
 ```python
-# Respect !important declarations
-merger = CSSMerger(
-    mode='permanent',
-    conflict_resolution={'important': 'respect'}
-)
-
+# 'match' strategy (default) - Add !important if original had it
+merger = CSSMerger(conflict_resolution={'important': 'match'})
 result = merger.merge(
-    ".alert { color: red !important; }",
-    {"color": "blue"}  # Won't override !important
+    ".text { color: blue !important; }",
+    {"color": "red"}
 )
+# Output: .text { color: red !important; }
 
-# Force override
-merger = CSSMerger(
-    mode='permanent',
-    conflict_resolution={'important': 'override'}
+# 'respect' strategy - Never override !important
+merger = CSSMerger(conflict_resolution={'important': 'respect'})
+result = merger.merge(
+    ".text { color: blue !important; }",
+    {"color": "red"}
 )
-# Blue will win regardless of !important
+# Output: .text { color: blue !important; }  # Original preserved
+
+# Other strategies:
+# 'override': Override but don't add !important
+# 'force': Always add !important to overrides
+# 'strip': Remove all !important declarations
 ```
 
 ### Shorthand Properties
 
-```python
-# Smart shorthand merging
-merger = CSSMerger(
-    mode='permanent',
-    conflict_resolution={'shorthand': 'smart'}
-)
+CSSCade offers three strategies for handling shorthand properties:
 
+#### 1. Cascade Strategy (Default)
+**Simple CSS cascade - later properties override**
+
+```python
+merger = CSSMerger(shorthand_strategy='cascade')
 result = merger.merge(
-    ".box { margin: 10px; }",
-    {"margin-top": "20px"}
+    ".box { margin: 10px; padding: 20px; }",
+    {"margin-top": "30px", "padding": "15px"}
 )
-# Result: margin: 20px 10px 10px 10px;
-
-# Use cascade strategy for complex shorthands
-merger = CSSMerger(
-    mode='permanent',
-    conflict_resolution={'shorthand': 'cascade'}
-)
+# Output: .box {
+#   margin: 10px;
+#   padding: 15px;      /* Fully replaced */
+#   margin-top: 30px;   /* Cascades over margin */
+# }
 ```
 
-## Advanced Usage 🎯
-
-### Real-World Example: Bootstrap Customization
+#### 2. Smart Strategy
+**Intelligent merging for margin/padding, cascade for complex properties**
 
 ```python
-# Customizing Bootstrap components while preserving functionality
-merger = CSSMerger(
-    mode='component',
-    conflict_resolution={
-        'pseudo': 'preserve',      # Keep hover/focus states
-        'important': 'respect',    # Respect Bootstrap's !important
-        'shorthand': 'smart',      # Smart margin/padding merge
-        'media': 'preserve'        # Keep responsive breakpoints
-    }
+merger = CSSMerger(shorthand_strategy='smart')
+result = merger.merge(
+    ".box { margin: 10px; padding: 20px; }",
+    {"margin-top": "30px", "padding": "15px"}
 )
-
-bootstrap_btn = """
-.btn-primary {
-    display: inline-block;
-    font-weight: 400;
-    color: #fff !important;
-    background-color: #007bff;
-    border: 1px solid #007bff;
-    padding: 0.375rem 0.75rem;
-    transition: all 0.15s ease-in-out;
-}
-.btn-primary:hover {
-    background-color: #0056b3;
-}
-"""
-
-brand_overrides = {
-    "background-color": "#28a745",  # Green instead of blue
-    "padding": "0.5rem 1.5rem",     # Larger padding
-    "border-radius": "50px"         # Pill shape
-}
-
-result = merger.merge(bootstrap_btn, brand_overrides)
-# Preserves hover states while applying brand customization
+# Output: .box {
+#   margin: 30px 10px 10px;  /* Smart merge: top changed, others preserved */
+#   padding: 15px;           /* Fully replaced */
+# }
 ```
 
-### Fallback Chains
-
-Use multiple strategies with automatic fallback:
+#### 3. Expand Strategy
+**Full expansion of all shorthands**
 
 ```python
-merger = CSSMerger(
-    mode='component',
-    conflict_resolution={
-        'pseudo': ['preserve', 'inline', 'force_merge'],  # Try in order
-        'important': ['respect', 'warn', 'override'],     # Fallback chain
-        'shorthand': ['smart', 'expand', 'cascade']       # Multiple strategies
-    }
+merger = CSSMerger(shorthand_strategy='expand')
+result = merger.merge(
+    ".box { border: 1px solid red; }",
+    {"border-width": "3px"}
 )
+# Output: .box {
+#   border-top-width: 3px;
+#   border-right-width: 3px;
+#   border-bottom-width: 3px;
+#   border-left-width: 3px;
+#   border-top-style: solid;
+#   border-right-style: solid;
+#   /* ... all properties expanded ... */
+# }
 ```
 
-### Runtime CSS Manipulation
+## Naming Configuration
 
-For JavaScript-based styling:
+Control how override classes are generated:
 
 ```python
-merger = CSSMerger(
-    mode='component',
-    conflict_resolution={
-        'pseudo': 'inline',      # Convert for JS handling
-        'media': 'inline',       # Handle breakpoints in JS
-        'important': 'override'  # Dynamic styles win
-    }
-)
+# Semantic naming (default) - Readable class names
+merger = CSSMerger(naming={
+    'strategy': 'semantic',  # my-btn-3f4a
+    'prefix': 'my-',
+    'suffix': '-override'
+})
+# Output: my-btn-3f4a-override
 
-result = merger.merge(source, overrides)
-# Returns inline styles and instructions for runtime application
+# Hash naming - Content-based unique identifiers
+merger = CSSMerger(naming={
+    'strategy': 'hash',      # css-7a9f2c
+    'hash_length': 6
+})
+# Output: css-7a9f2c (same content = same hash)
+
+# Sequential naming - Simple counters
+merger = CSSMerger(naming={
+    'strategy': 'sequential'  # style-1, style-2, style-3
+})
+# Output: style-1
 ```
 
-## API Reference 📚
-
-### CSSMerger Constructor
-
-```python
-merger = CSSMerger(
-    mode='component',           # Required: 'permanent'|'component'|'replace'
-    conflict_resolution={...},  # Optional: Resolution strategies
-    naming={...},              # Optional: Class naming configuration
-    validation={...},          # Optional: Validation settings
-    performance={...},         # Optional: Performance tuning
-    debug=False                # Optional: Enable debug output
-)
-```
-
-### Configuration Options
-
-#### Naming Configuration
-Control how generated class names are created:
-
-```python
-naming={
-    'strategy': 'semantic',    # 'hash'| 'semantic' | 'sequential'
-    'prefix': 'csscade-',      # Prefix for all generated classes
-    'suffix': '-override',     # Suffix for all generated classes
-    'hash_length': 8           # Length of hash when using hash strategy
-}
-```
-
-**Examples:**
-```python
-# Custom prefix for your app
-merger = CSSMerger(
-    mode='component',
-    naming={'prefix': 'myapp-'}
-)
-# Generates: .myapp-btn-override-xxx
-
-# Hash-based names with custom length
-merger = CSSMerger(
-    mode='replace',
-    naming={'strategy': 'hash', 'hash_length': 12}
-)
-# Generates: .css-a1b2c3d4e5f6
-
-# Semantic names with prefix and suffix
-merger = CSSMerger(
-    mode='component',
-    naming={
-        'strategy': 'semantic',
-        'prefix': 'brand-',
-        'suffix': '-custom'
-    }
-)
-# Generates: .brand-btn-override-custom
-```
-
-#### Validation Configuration
-Control CSS validation behavior:
-
-```python
-validation={
-    'strict': True,            # Strict CSS syntax validation
-    'allow_vendor': True,      # Allow vendor prefixes (-webkit-, -moz-, etc.)
-    'check_duplicates': True   # Check for duplicate properties
-}
-```
-
-#### Performance Configuration
-Optimize for your use case:
-
-```python
-performance={
-    'optimize': True,          # Enable performance optimizations
-    'cache': True,            # Cache parsed CSS rules
-    'batch_size': 100         # Batch size for bulk operations
-}
-```
-
-### Conflict Resolution Options
-
-| Conflict Type | Strategies | Description |
-|--------------|------------|-------------|
-| `pseudo` | `preserve`, `inline`, `ignore`, `force_merge`, `extract` | Handle :hover, :focus, etc. |
-| `important` | `respect`, `override`, `warn`, `strip` | Handle !important declarations |
-| `shorthand` | `smart`, `expand`, `cascade`, `preserve` | Handle margin, padding, border, etc. |
-| `media` | `preserve`, `inline`, `duplicate`, `extract` | Handle @media queries |
-| `multiple_rules` | `first`, `all`, `most_specific` | Handle multiple matching rules |
-
-### Result Dictionary
-
-The `merge()` method returns a dictionary with:
-
+**Default naming configuration:**
 ```python
 {
-    'css': str,              # Generated CSS string
-    'add': List[str],        # Classes to add to element
-    'remove': List[str],     # Classes to remove from element
-    'preserve': List[str],   # Classes to keep on element
-    'inline_styles': Dict,   # Inline styles (if applicable)
-    'warnings': List[str],   # Warning messages
-    'info': List[str]        # Informational messages
+    'strategy': 'semantic',    # Readable names
+    'prefix': 'csscade-',      # Default prefix
+    'suffix': '',              # No suffix by default
+    'hash_length': 8           # For hash strategy
 }
 ```
 
-## Use Cases 💡
+## Validation Configuration
 
-### 1. Theme Customization
-Apply brand colors and styles to third-party components while preserving their functionality.
-
-### 2. Runtime Theming
-Allow users to customize UI elements dynamically without rebuilding CSS.
-
-### 3. CSS-in-JS Libraries
-Merge styles from different sources with proper conflict resolution.
-
-### 4. Design System Overrides
-Override design system defaults while maintaining consistency.
-
-### 5. A/B Testing
-Create variant styles without duplicating entire CSS rules.
-
-## Examples
-
-### Simple Property Override
+Catch CSS errors and typos with optional validation:
 
 ```python
-from csscade import CSSMerger
+# Development - Helpful warnings
+merger = CSSMerger(validation={
+    'enabled': True,
+    'check_values': True  # Validate color values, units, etc.
+})
 
-# Simple override
-merger = CSSMerger(mode='permanent')
 result = merger.merge(
-    ".text { color: black; font-size: 14px; }",
-    {"color": "blue"}
+    ".card { padding: 10px; }",
+    {
+        "fake-property": "value",     # Unknown property
+        "color": "not-a-color",       # Invalid value
+        "margin": "10px",
+        "margin-top": "20px"          # Duplicate warning
+    }
 )
-print(result['css'])
-# Output: .text { color: blue; font-size: 14px; }
+# Warnings: [
+#   "Unknown CSS property: 'fake-property'",
+#   "Invalid color value: 'not-a-color'",
+#   "Potential duplicate: 'margin-top'"
+# ]
+
+# Production - Strict validation (throws errors)
+merger = CSSMerger(validation={
+    'enabled': True,
+    'strict': True  # Raises exception on invalid CSS
+})
+
+# Minimal - Just enable validation
+merger = CSSMerger(validation={'enabled': True})
 ```
 
-### Component Composition
-
+**Default validation configuration:**
 ```python
-# Combining multiple style sources
-merger = CSSMerger(mode='component')
-
-base_styles = ".card { padding: 20px; border: 1px solid #ccc; }"
-theme_overrides = {"border-color": "#007bff", "box-shadow": "0 2px 4px rgba(0,0,0,0.1)"}
-
-result = merger.merge(base_styles, theme_overrides)
-# Apply both classes to get combined styles
-```
-
-### Handling Edge Cases
-
-```python
-# Empty source
-merger = CSSMerger(mode='permanent')
-result = merger.merge("", {"color": "blue"})
-
-# Empty overrides
-result = merger.merge(".btn { color: red; }", {})
-
-# Properties only (no selector)
-result = merger.merge(
-    {"color": "red", "padding": "10px"},
-    {"color": "blue", "margin": "5px"}
-)
+{
+    'enabled': False,         # Off by default (backwards compatible)
+    'strict': False,          # Warnings, not errors
+    'check_properties': True, # Check property names when enabled
+    'check_values': False,    # Don't check values by default (expensive)
+    'allow_vendor': True,     # Allow -webkit-, -moz-, etc.
+    'allow_custom': True,     # Allow --css-variables
+    'check_duplicates': True  # Warn about duplicate properties
+}
 ```
 
 ## Complete Configuration Examples 🎯
 
 ### Production Configuration
-Full configuration for production use:
 
 ```python
 merger = CSSMerger(
     mode='component',
-    
-    # Custom class naming
+    rule_selection='all',
     naming={
         'strategy': 'semantic',
-        'prefix': 'myapp-',
+        'prefix': 'app-',
         'suffix': ''
     },
-    
-    # Conflict resolution
     conflict_resolution={
-        'pseudo': 'preserve',
-        'important': 'respect',
-        'shorthand': 'smart',
-        'media': 'preserve'
+        'important': 'match'
     },
-    
-    # Performance optimizations
-    performance={
-        'optimize': True,
-        'cache': True
-    },
-    
-    # Validation
+    shorthand_strategy='smart',
     validation={
+        'enabled': True,
         'strict': False,
-        'allow_vendor': True
+        'check_properties': True
     }
 )
 ```
 
 ### Development Configuration
-Configuration for development with debugging:
 
 ```python
 merger = CSSMerger(
     mode='component',
-    naming={'prefix': 'dev-'},
-    conflict_resolution={
-        'pseudo': ['preserve', 'inline'],  # Fallback chains
-        'important': 'warn'
+    rule_selection='all',
+    naming={'strategy': 'sequential', 'prefix': 'dev-'},
+    validation={
+        'enabled': True,
+        'check_values': True,
+        'strict': False
     },
-    debug=True  # Enable debug output
+    shorthand_strategy='expand',  # See all properties
+    debug=True
 )
 ```
 
-### Minimal Configuration
-Just the essentials:
+## Advanced Usage 🔧
+
+### Real-World Example: Bootstrap Customization
+
+Customize Bootstrap components while preserving all states:
 
 ```python
-# Only mode is required
-merger = CSSMerger(mode='permanent')
-
-# With one customization
 merger = CSSMerger(
     mode='component',
-    naming={'prefix': 'custom-'}
+    rule_selection='all',
+    shorthand_strategy='smart'
 )
+
+bootstrap_button = """
+.btn-primary {
+    background: #007bff;
+    color: white;
+    padding: 0.375rem 0.75rem;
+    border: 1px solid #007bff;
+}
+.btn-primary:hover {
+    background: #0056b3;
+    border-color: #004085;
+}
+.btn-primary:active {
+    background: #004085;
+}
+"""
+
+brand_overrides = {
+    "background": "#28a745",     # Green instead of blue
+    "border-color": "#28a745",
+    "font-weight": "bold"
+}
+
+result = merger.merge(bootstrap_button, brand_overrides, apply_to='all')
+
+# Output:
+# .app-btn-primary-x1a3 { 
+#     background: #28a745; 
+#     color: white;
+#     padding: 0.375rem 0.75rem;
+#     border-color: #28a745;
+#     font-weight: bold;
+# }
+# .app-btn-primary-x1a3:hover {
+#     background: #28a745;
+#     border-color: #28a745;
+#     font-weight: bold;
+# }
+# .app-btn-primary-x1a3:active {
+#     background: #28a745;
+#     border-color: #28a745;
+#     font-weight: bold;
+# }
+
+# Usage: <button class="btn-primary app-btn-primary-x1a3">
+```
+
+### Runtime CSS Manipulation (Inline Styling)
+
+Generate inline styles for dynamic theming:
+
+```python
+merger = CSSMerger(mode='permanent')
+
+# User's theme preferences
+user_theme = {
+    "primary-color": "#FF5722",
+    "font-size": "18px"
+}
+
+# Generate inline styles
+result = merger.merge(
+    "body { color: #333; font-size: 16px; }",
+    user_theme
+)
+
+# Apply dynamically
+element.style.cssText = result['css'][0]
+```
+
+### Batch Operations
+
+Process multiple CSS operations efficiently:
+
+```python
+merger = CSSMerger(mode='component')
+batch = merger.batch()
+
+# Queue multiple operations
+batch.add(".header { color: black; }", {"background": "white"})
+batch.add(".footer { padding: 20px; }", {"border-top": "1px solid gray"})
+batch.add(".sidebar { width: 200px; }", {"background": "#f5f5f5"})
+
+# Execute all at once
+results = batch.execute()
+
+for i, result in enumerate(results):
+    print(f"Operation {i+1}: {result['add']}")
+```
+
+## Result Dictionary Structure
+
+All merge operations return a consistent structure:
+
+```python
+{
+    'css': [],        # List of generated CSS strings (always list)
+    'add': [],        # Classes to add to element (always list)
+    'remove': [],     # Classes to remove from element (always list)
+    'preserve': [],   # Original classes to keep (always list)
+    'warnings': [],   # Validation/conflict warnings (always list)
+    'info': []        # Informational messages (always list)
+}
+```
+
+## API Reference
+
+### CSSMerger Constructor
+
+```python
+CSSMerger(
+    mode='component',              # 'permanent'|'component'|'replace'
+    rule_selection='first',        # 'first'|'all'
+    naming={                       # Class naming configuration
+        'strategy': 'semantic',    # 'semantic'|'hash'|'sequential'
+        'prefix': 'csscade-',
+        'suffix': '',
+        'hash_length': 8
+    },
+    conflict_resolution={          # Conflict handling
+        'important': 'match'       # 'match'|'respect'|'override'|'force'|'strip'
+    },
+    shorthand_strategy='cascade',  # 'cascade'|'smart'|'expand'
+    validation={                   # CSS validation
+        'enabled': False,
+        'strict': False,
+        'check_properties': True,
+        'check_values': False,
+        'allow_vendor': True,
+        'allow_custom': True,
+        'check_duplicates': True
+    },
+    debug=False                    # Enable debug output
+)
+```
+
+### merge() Method
+
+```python
+result = merger.merge(
+    source,          # CSS string, rule, or properties dict
+    override,        # Properties dict or CSS string
+    component_id=None,  # Optional unique identifier
+    apply_to='all'   # Which rules to apply overrides to
+)
+```
+
+## Default Values Reference
+
+| Parameter | Default Value | Description |
+|-----------|--------------|-------------|
+| `mode` | `'component'` | Merge strategy |
+| `rule_selection` | `'first'` | Process first CSS rule/class only |
+| `shorthand_strategy` | `'cascade'` | Simple CSS cascade |
+| `naming.strategy` | `'semantic'` | Readable class names |
+| `naming.prefix` | `'csscade-'` | Class name prefix |
+| `validation.enabled` | `False` | Validation off by default |
+| `conflict_resolution.important` | `'match'` | Match original !important |
+
+## Testing
+
+Run the comprehensive test suite:
+
+```bash
+# Basic test
+python _test_comprehensive.py
+
+# Run all tests
+python -m pytest tests/
 ```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please check out our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
-## Support
+## Links
 
-For bug reports, issues or suggestions, please open an issue on GitHub.
-
-## Author
-
-[sebieire](https://github.com/sebieire/)
+- [PyPI Package](https://pypi.org/project/csscade/)
+- [GitHub Repository](https://github.com/yourusername/csscade)
+- [Issue Tracker](https://github.com/yourusername/csscade/issues)

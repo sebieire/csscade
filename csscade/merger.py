@@ -24,7 +24,9 @@ class CSSMerger:
         naming: Optional[Dict[str, Any]] = None,
         validation: Optional[Dict[str, Any]] = None,
         performance: Optional[Dict[str, Any]] = None,
-        debug: bool = False
+        debug: bool = False,
+        rule_selection: str = "first",  # New parameter for multi-rule support
+        shorthand_strategy: str = "cascade"  # Strategy for handling shorthands
     ):
         """
         Initialize the CSS merger.
@@ -36,6 +38,8 @@ class CSSMerger:
             validation: Validation configuration
             performance: Performance configuration
             debug: Enable debug mode
+            rule_selection: Rule selection mode ('first' or 'all')
+            shorthand_strategy: Shorthand handling strategy ('cascade', 'smart', 'expand')
         """
         self.mode = mode
         self.conflict_resolution = conflict_resolution or {}
@@ -43,6 +47,12 @@ class CSSMerger:
         self.validation = validation or {}
         self.performance = performance or {}
         self.debug = debug
+        self.rule_selection = rule_selection
+        self.shorthand_strategy = shorthand_strategy
+        
+        # Validate rule_selection parameter
+        if rule_selection not in ['first', 'all']:
+            raise ValueError(f"Invalid rule_selection: {rule_selection}. Must be 'first' or 'all'")
         
         # Initialize strategy based on mode
         self._strategy = self._get_strategy(mode)
@@ -61,11 +71,11 @@ class CSSMerger:
             Merge strategy instance
         """
         if mode == "permanent":
-            return PermanentMergeStrategy(self.conflict_resolution, self.naming)
+            return PermanentMergeStrategy(self.conflict_resolution, self.naming, self.rule_selection, self.shorthand_strategy, self.validation)
         elif mode == "component":
-            return ComponentMergeStrategy(self.conflict_resolution, self.naming)
+            return ComponentMergeStrategy(self.conflict_resolution, self.naming, self.rule_selection, self.shorthand_strategy, self.validation)
         elif mode == "replace":
-            return ReplaceMergeStrategy(self.conflict_resolution, self.naming)
+            return ReplaceMergeStrategy(self.conflict_resolution, self.naming, self.rule_selection, self.shorthand_strategy, self.validation)
         else:
             raise ValueError(f"Unknown merge mode: {mode}")
     
@@ -74,6 +84,7 @@ class CSSMerger:
         source: Union[str, CSSRule, Dict[str, str], List[CSSProperty]],
         override: Union[Dict[str, str], List[CSSProperty], str],
         component_id: Optional[str] = None,
+        apply_to: Union[str, List[str]] = 'all',  # New parameter for selective override application
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -83,17 +94,17 @@ class CSSMerger:
             source: Source CSS (can be rule, properties, or string)
             override: Override properties
             component_id: Optional component ID for unique naming
+            apply_to: Which rules to apply overrides to ('all', 'base', or list of selectors)
             **kwargs: Additional strategy-specific parameters
             
         Returns:
             Dictionary with merge results based on strategy:
-                - css: Generated CSS string (optional)
-                - add: Classes to add (optional)
-                - remove: Classes to remove (optional)
-                - preserve: Classes to preserve (optional)
-                - inline: Inline styles to apply (optional)
-                - important: Important styles to apply (optional)
-                - warnings: Warning messages (optional)
+                - css: List of generated CSS strings
+                - add: List of classes to add
+                - remove: List of classes to remove
+                - preserve: List of classes to preserve
+                - warnings: List of warning messages (always present)
+                - info: List of informational messages (always present)
                 - debug: Debug information (if debug mode enabled)
         """
         # Perform the merge using the selected strategy
@@ -101,6 +112,7 @@ class CSSMerger:
             source=source,
             override=override,
             component_id=component_id,
+            apply_to=apply_to,
             **kwargs
         )
         
