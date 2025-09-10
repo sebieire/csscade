@@ -1,23 +1,43 @@
 # CSSCade 🎨
 
-[![PyPI version](https://badge.fury.io/py/csscade.svg)](https://pypi.org/project/csscade/)
+[![PyPI version](https://img.shields.io/pypi/v/csscade.svg)](https://pypi.org/project/csscade/)
 [![Python Support](https://img.shields.io/pypi/pyversions/csscade.svg)](https://pypi.org/project/csscade/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Intelligent CSS merging with conflict resolution and multiple strategies**
+**Intelligent CSS merging and conflict resolution with two powerful systems**
 
-CSSCade is a Python library that intelligently merges CSS properties from different sources, handling conflicts, preserving specificity, and supporting various merge strategies. Perfect for theme customization, runtime CSS manipulation, and CSS-in-JS implementations.
+CSSCade provides two complementary systems for CSS manipulation:
+
+1. **CSSMerger** - Property-level CSS merging with multiple strategies
+2. **Combinator** (v0.3.0) - Intelligent conflict detection for existing CSS frameworks
+
+Perfect for theme customization, CSS framework overrides, runtime CSS manipulation, and CSS-in-JS implementations.
+
+I was looking for something like this in the python ecosystem and couldn't find anything that matched my usecase so here it is. Enjoy!
 
 ## Features ✨
 
+### Core Features
+- **Intelligent Conflict Resolution**: Handle !important, shorthand properties, and duplicates
+- **Pseudo-selector Support**: Full support for :hover, :focus, :before, :after, etc.
+- **Media Query Support**: Responsive design support with @media rules
+- **Production Ready**: Used in real-world applications for dynamic theming
+
+### CSSMerger System
 - **3 Merge Modes**: Permanent, Component, and Replace strategies
 - **Multi-Rule Support**: Process all CSS rules including pseudo-selectors with `rule_selection='all'`
 - **Selective Application**: Target specific rules with the `apply_to` parameter
-- **Intelligent Conflict Resolution**: Handle !important, shorthand properties, and duplicates
 - **Smart Property Merging**: Configurable shorthand strategies (cascade, smart, expand)
 - **CSS Validation**: Optional property and value validation with helpful warnings
 - **Flexible Naming**: Multiple class naming strategies (semantic, hash, sequential)
-- **Production Ready**: Used in real-world applications for dynamic theming
+
+### Combinator System (v0.3.0)
+- **Automatic Conflict Detection**: Analyzes existing CSS classes and finds conflicts
+- **Framework Integration**: Works with Bootstrap, Tailwind, or any CSS framework
+- **Smart Class Management**: Automatically determines which classes to keep/remove
+- **Override Generation**: Creates optimized override CSS with minimal !important usage
+- **Inline Fallback**: Generates React/JS-compatible inline styles
+- **Batch Processing**: Efficiently process multiple elements
 
 ## Installation
 
@@ -29,7 +49,9 @@ pip install csscade
 
 ## Quick Start 🚀
 
-### Basic Usage
+CSSCade offers two approaches depending on your needs:
+
+### Method 1: CSSMerger - For Manual CSS Generation
 
 ```python
 from csscade import CSSMerger
@@ -43,25 +65,40 @@ overrides = {"color": "blue", "margin": "5px"}
 
 result = merger.merge(source_css, overrides)
 
-# Result structure (all fields always present):
-print(result['css'])        # List of generated CSS strings
-print(result['add'])        # Classes to add: ['csscade-btn-xxxx']
-print(result['remove'])     # Classes to remove: []
-print(result['preserve'])   # Classes to keep: ['btn']
-print(result['warnings'])   # Any warnings: []
-print(result['info'])       # Informational messages: []
+# Result structure:
+print(result['css'])        # ['.csscade-btn-3f4a { color: blue; padding: 10px; margin: 5px; }']
+print(result['add'])        # ['csscade-btn-3f4a']
+print(result['preserve'])   # ['btn']
 ```
 
-**Output:**
+### Method 2: Combinator - For Working with Existing CSS Frameworks
+
 ```python
-{
-    'css': ['.csscade-btn-3f4a { color: blue; padding: 10px; margin: 5px; }'],
-    'add': ['csscade-btn-3f4a'],
-    'remove': [],
-    'preserve': ['btn'],
-    'warnings': [],
-    'info': ['Created override class .csscade-btn-3f4a with merged properties']
-}
+from csscade.combinator import Combinator
+
+# Load your CSS framework
+combinator = Combinator()
+combinator.load_css(['bootstrap.css', 'custom.css'])
+
+# Process an element with conflicts
+result = combinator.process(
+    element_classes=['btn', 'btn-primary', 'p-3'],
+    overrides={
+        'background': '#28a745',
+        'padding': '2rem',
+        ':hover': {
+            'background': '#218838'
+        }
+    },
+    element_id='my_button'
+)
+
+# Result structure:
+print(result['remove_classes'])  # ['btn-primary', 'p-3'] - conflicting classes
+print(result['keep_classes'])    # ['btn'] - non-conflicting classes  
+print(result['add_classes'])     # ['csso-my_button'] - generated override class
+print(result['generated_css'])   # Complete CSS with !important only where needed
+print(result['fallback_inline']) # {'background': '#28a745', 'padding': '2rem'}
 ```
 
 ### Multi-Rule Support
@@ -86,9 +123,243 @@ result = merger.merge(
 # Both .btn and .btn:hover get background: blue
 ```
 
-## Merge Modes
+## Combinator System (v0.3.0)
 
-### 1. Permanent Mode
+The Combinator system automatically detects conflicts between existing CSS classes and your desired style overrides, intelligently managing which classes to keep, remove, or add.
+
+### When to Use Combinator vs CSSMerger
+
+**Use Combinator when:**
+- Working with existing CSS frameworks (Bootstrap, Tailwind, etc.)
+- You need automatic conflict detection
+- Managing class lists on existing elements
+- You want to minimize !important usage
+
+**Use CSSMerger when:**
+- Generating CSS from scratch
+- You need fine-grained control over merge strategies
+- Building CSS programmatically
+- Working with CSS strings rather than class lists
+
+### Basic Combinator Usage
+
+```python
+from csscade.combinator import Combinator
+
+# Step 1: Load your CSS
+combinator = Combinator()
+combinator.load_css(['bootstrap.css', 'theme.css'])  # Can be files or CSS strings
+
+# Step 2: Process an element
+result = combinator.process(
+    element_classes=['col-lg-6', 'bg-primary', 'p-3', 'text-white'],
+    overrides={
+        'background': 'linear-gradient(to right, #667eea, #764ba2)',
+        'padding': '2rem',
+        'margin': '1rem'
+    },
+    element_id='hero_section'
+)
+
+# Step 3: Use the results
+print(result['remove_classes'])  # ['bg-primary', 'p-3'] - have conflicts
+print(result['keep_classes'])    # ['col-lg-6', 'text-white'] - no conflicts
+print(result['add_classes'])     # ['csso-hero_section'] - new override class
+```
+
+### Combinator with Pseudo-selectors and Media Queries
+
+```python
+result = combinator.process(
+    element_classes=['btn', 'btn-primary'],
+    overrides={
+        'background': '#28a745',
+        'padding': '1rem 2rem',
+        ':hover': {
+            'background': '#218838',
+            'transform': 'scale(1.05)'
+        },
+        ':focus': {
+            'outline': '3px solid #ffc107'
+        },
+        '@media (min-width: 768px)': {
+            'padding': '1.5rem 3rem',
+            'font-size': '1.25rem'
+        }
+    },
+    element_id='cta_button'
+)
+
+# Generated CSS includes:
+# - Base styles with !important only for conflicting properties
+# - Hover and focus states
+# - Media query for responsive design
+print(result['generated_css'])
+```
+
+### Processing HTML Elements Directly
+
+```python
+# You can also process HTML strings directly
+html = '<div class="card shadow p-4 mt-3">Content</div>'
+
+result = combinator.process_element(
+    html=html,
+    overrides={
+        'background': '#f8f9fa',
+        'padding': '2rem',
+        'margin-top': '2rem'
+    },
+    element_id='custom_card'
+)
+```
+
+### Batch Processing Multiple Elements
+
+```python
+# Process multiple elements efficiently
+elements = [
+    {
+        'element_classes': ['btn', 'btn-primary'],
+        'overrides': {'background': '#28a745'},
+        'element_id': 'btn1'
+    },
+    {
+        'element_classes': ['card', 'p-3'],
+        'overrides': {'padding': '2rem'},
+        'element_id': 'card1'
+    }
+]
+
+results = combinator.process_batch(elements)
+```
+
+### Understanding Conflict Detection
+
+The Combinator uses intelligent conflict detection that understands CSS property relationships:
+
+```python
+# Example: Shorthand vs Longhand conflicts
+result = combinator.process(
+    element_classes=['p-3', 'pt-2', 'border', 'rounded'],
+    overrides={
+        'padding-top': '3rem',    # Conflicts with both p-3 and pt-2
+        'border-color': '#ff0000'  # Conflicts with border shorthand
+    },
+    element_id='test'
+)
+
+# Result:
+# - Removes: ['p-3', 'pt-2', 'border'] (all have conflicts)
+# - Keeps: ['rounded'] (border-radius is independent)
+```
+
+### Complete Combinator Example
+
+```python
+from csscade.combinator import Combinator
+
+# Load CSS from your framework
+combinator = Combinator()
+combinator.load_css([
+    'path/to/bootstrap.min.css',
+    'path/to/custom-theme.css'
+])
+
+# Define your element and overrides
+element_classes = [
+    'container-fluid', 'row', 'col-lg-6',
+    'bg-gradient-primary', 'shadow-lg',
+    'text-white', 'p-5', 'rounded-lg'
+]
+
+style_overrides = {
+    # Regular properties
+    'background': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    'padding': '3rem',
+    'box-shadow': '0 20px 40px rgba(0,0,0,0.1)',
+    
+    # Pseudo-selectors
+    ':hover': {
+        'transform': 'translateY(-5px)',
+        'box-shadow': '0 25px 50px rgba(0,0,0,0.15)'
+    },
+    
+    # Media queries
+    '@media (min-width: 992px)': {
+        'padding': '5rem',
+        'font-size': '1.25rem'
+    }
+}
+
+# Process the element
+result = combinator.process(
+    element_classes=element_classes,
+    overrides=style_overrides,
+    element_id='hero_block'
+)
+
+# Apply the results to your HTML
+print(f"Remove these classes: {result['remove_classes']}")
+print(f"Keep these classes: {result['keep_classes']}")
+print(f"Add this class: {result['add_classes'][0]}")
+
+# Inject the generated CSS
+print(f"<style>\n{result['generated_css']}\n</style>")
+
+# Or use inline styles as fallback (excludes pseudo-selectors and media queries)
+print(f"Inline fallback: {result['fallback_inline']}")
+```
+
+### Combinator API Reference
+
+#### Constructor
+```python
+combinator = Combinator()
+```
+
+#### Methods
+
+**`load_css(css_sources)`**
+- Load CSS files or strings for analysis
+- `css_sources`: List of file paths or CSS strings
+
+**`process(element_classes, overrides, element_id)`**
+- Process style overrides for given classes
+- `element_classes`: List of CSS class names
+- `overrides`: Dictionary of CSS properties (supports pseudo-selectors and media queries)
+- `element_id`: Unique identifier for generating class names
+- Returns: Dictionary with conflict analysis and generated CSS
+
+**`process_element(html, overrides, element_id)`**
+- Process an HTML element string
+- Automatically extracts classes from HTML
+
+**`process_batch(elements)`**
+- Process multiple elements efficiently
+- `elements`: List of dictionaries with element configurations
+
+**`clear_cache()`**
+- Clear loaded CSS cache
+
+### Result Dictionary Structure
+
+```python
+{
+    'remove_classes': [],     # Classes that conflict with overrides
+    'keep_classes': [],       # Classes without conflicts
+    'add_classes': [],        # Generated override class name(s)
+    'generated_css': '',      # Complete CSS with override rules
+    'fallback_inline': {},    # Inline styles (camelCase, no pseudo/media)
+    'conflicts_found': []     # Detailed conflict descriptions
+}
+```
+
+## CSSMerger System
+
+### CSSMerger Merge Modes
+
+#### 1. Permanent Mode
 **Directly modifies the original CSS rule. Best for build-time CSS generation.**
 
 ```python
@@ -111,7 +382,7 @@ print(result['css'][0])
 # No class changes needed
 ```
 
-### 2. Component Mode (Default)
+#### 2. Component Mode (Default)
 **Creates an override class while preserving the original. Perfect for theming systems.**
 
 ```python
@@ -136,7 +407,7 @@ print(result['preserve'])  # ['btn']
 # Usage: element.className = "btn csscade-btn-3f4a"
 ```
 
-### 3. Replace Mode
+#### 3. Replace Mode
 **Creates a complete replacement class. Best for total style replacement.**
 
 ```python
@@ -161,7 +432,7 @@ print(result['remove'])  # ['old-style']
 # Usage: element.className = "csscade-8d2f"
 ```
 
-## Apply To Parameter (Selective Override)
+## CSSMerger Apply To Parameter (Selective Override)
 
 The `apply_to` parameter lets you target specific rules when using `rule_selection='all'`.
 
@@ -209,14 +480,31 @@ result = merger.merge(
 
 ### Available Apply To Options
 
+**Special Keywords:**
 - `'all'` - Apply to all rules (default)
 - `'base'` - Apply to base rule only (no pseudo-selectors)
-- `[':hover']` - Apply to specific pseudo-selector
-- `[':hover', ':active']` - Apply to multiple pseudo-selectors
-- `['.btn']` - Apply to specific class
-- `['.btn:hover']` - Apply to specific class with pseudo-selector
+- `'states'` - Apply only to pseudo-class selectors (all states)
 
-## Conflict Resolution
+**Wildcards:**
+- `'*'` - Apply to all rules (same as 'all')
+- `'.*'` - Apply to all base classes (no pseudo-selectors)
+- `'*:hover'` - Apply to all rules with :hover pseudo-class
+- `'*:active'` - Apply to all rules with :active pseudo-class
+- `'*:focus'` - Apply to all rules with :focus pseudo-class
+
+**Specific Selectors:**
+- `['.btn']` - Apply to specific class (base rule only)
+- `['.btn:hover']` - Apply to specific class with pseudo-selector
+- `[':hover']` - Apply to any rule with :hover pseudo-class
+- `[':active']` - Apply to any rule with :active pseudo-class
+- `[':focus']` - Apply to any rule with :focus pseudo-class
+
+**Multiple Targets:**
+- `[':hover', ':active']` - Apply to multiple pseudo-selectors
+- `['.btn', '.btn:hover']` - Apply to specific class and its hover state
+- `['base', ':active']` - Apply to base rules and :active states
+
+## CSSMerger Conflict Resolution
 
 ### !important Handling
 
@@ -300,7 +588,7 @@ result = merger.merge(
 # }
 ```
 
-## Naming Configuration
+## CSSMerger Naming Configuration
 
 Control how override classes are generated:
 
@@ -337,7 +625,7 @@ merger = CSSMerger(naming={
 }
 ```
 
-## Validation Configuration
+## CSSMerger Validation Configuration
 
 Catch CSS errors and typos with optional validation:
 
@@ -386,7 +674,7 @@ merger = CSSMerger(validation={'enabled': True})
 }
 ```
 
-## Complete Configuration Examples 🎯
+## CSSMerger Complete Configuration Examples 🎯
 
 ### Production Configuration
 
@@ -428,7 +716,7 @@ merger = CSSMerger(
 )
 ```
 
-## Advanced Usage 🔧
+## Advanced CSSMerger Usage 🔧
 
 ### Real-World Example: Bootstrap Customization
 
@@ -530,7 +818,7 @@ for i, result in enumerate(results):
     print(f"Operation {i+1}: {result['add']}")
 ```
 
-## Result Dictionary Structure
+## CSSMerger Result Dictionary Structure
 
 All merge operations return a consistent structure:
 
@@ -545,7 +833,7 @@ All merge operations return a consistent structure:
 }
 ```
 
-## API Reference
+## CSSMerger API Reference
 
 ### CSSMerger Constructor
 
