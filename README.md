@@ -148,7 +148,9 @@ from csscade.combinator import Combinator
 
 # Step 1: Load your CSS
 combinator = Combinator()
-combinator.load_css(['bootstrap.css', 'theme.css'])  # Can be files or CSS strings
+combinator.load_css(['bootstrap.css', 'theme.css'])  # Can be files
+or
+combinator.load_css(['{...valid css string...}'])  # CSS strings
 
 # Step 2: Process an element
 result = combinator.process(
